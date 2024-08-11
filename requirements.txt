@@ -1,0 +1,7 @@
+streamlit 
+SQLAlchemy
+pandas
+plotly
+scikit-learn
+nltk
+fpdf
