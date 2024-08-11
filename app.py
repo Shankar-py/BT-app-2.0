@@ -71,12 +71,10 @@ def check_password(password, hashed):
 # Streamlit Config
 st.set_page_config(
     page_title="BT Project Management",
-    page_icon="C:/Users/brajb/OneDrive/Desktop/coding development/New BT app/Black and Purple Gradient Modern Futuristic Rocket Icon Tech Logo (1).png",
     layout="wide"
 )
 
-# Sidebar for navigation with larger logo
-st.sidebar.image("C:/Users/brajb/OneDrive/Desktop/coding development/New BT app/Black and Purple Gradient Modern Futuristic Rocket Icon Tech Logo (1).png", width=300)
+# Sidebar for navigation without logo
 st.sidebar.markdown("### Developed and under trial by Shankar")
 st.sidebar.title("Navigation")
 
@@ -605,4 +603,3 @@ if st.session_state['logged_in']:
 
 # Closing session
 session.close()
-
