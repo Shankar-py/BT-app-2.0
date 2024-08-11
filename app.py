@@ -10,17 +10,30 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
 from fpdf import FPDF
+import hashlib
 import nltk
-from nltk import word_tokenize, pos_tag, ne_chunk
+import logging
 
-# Download necessary NLTK data
-nltk.download('punkt')
-nltk.download('averaged_perceptron_tagger')
-nltk.download('maxent_ne_chunker')
-nltk.download('words')
+# Setup logging instead of print statements
+logging.basicConfig(filename="app.log", level=logging.INFO)
+logging.info("Application started successfully.")
+
+# Check if the necessary NLTK data is available
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt', quiet=True)
 
 # Database setup
 Base = declarative_base()
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True)
+    password = Column(String)
+    department = Column(String)
+    role = Column(String)
 
 class Project(Base):
     __tablename__ = 'projects'
@@ -42,33 +55,18 @@ class Project(Base):
     team_size = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
-class Task(Base):
-    __tablename__ = 'tasks'
-    id = Column(Integer, primary_key=True)
-    project_id = Column(Integer, ForeignKey('projects.id'))
-    name = Column(String)
-    status = Column(String, default="Not Started")
-    due_date = Column(DateTime)
-    project = relationship("Project", back_populates="tasks")
-
-Project.tasks = relationship("Task", order_by=Task.id, back_populates="project")
-
 engine = create_engine('sqlite:///bt_app.db')
 Base.metadata.create_all(engine)
 
 Session = sessionmaker(bind=engine)
+session = Session()
 
-# Initialize session state for centralized project management
-if 'session' not in st.session_state:
-    st.session_state['session'] = Session()
+# Helper functions for password hashing
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 
-if 'selected_project' not in st.session_state:
-    st.session_state['selected_project'] = None
-
-if 'project_data' not in st.session_state:
-    st.session_state['project_data'] = {}
-
-session = st.session_state['session']
+def check_password(password, hashed):
+    return hash_password(password) == hashed
 
 # Streamlit Config
 st.set_page_config(
@@ -78,22 +76,64 @@ st.set_page_config(
 )
 
 # Sidebar for navigation with larger logo
-st.sidebar.image("C:/Users/brajb/OneDrive/Desktop/coding development/New BT app/Black and Purple Gradient Modern Futuristic Rocket Icon Tech Logo (1).png", width=250)
+st.sidebar.image("C:/Users/brajb/OneDrive/Desktop/coding development/New BT app/Black and Purple Gradient Modern Futuristic Rocket Icon Tech Logo (1).png", width=300)
+st.sidebar.markdown("### Developed and under trial by Shankar")
 st.sidebar.title("Navigation")
 
-# Categorized navigation options
-categories = {
-    "Home": ["Home"],
-    "Project Management": ["Dashboard", "Project Management", "Risk Management", "Resource Management", "Time Tracking and Billing"],
-    "Reporting": ["Reporting", "Project Portfolio Management"],
-    "Stakeholders": ["Client and Stakeholder Management", "Knowledge Management"],
-    "Compliance and Governance": ["Compliance and Governance", "Gamification"],
-    "Continuous Improvement": ["Continuous Improvement", "AI-Powered Task Recommendations"],
-    "Settings": ["Mobile Access and Notifications", "Customizable Dashboards and Dark Mode", "Advanced Scheduling"]
-}
+# User Authentication
+def register_user():
+    st.title("Register")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    department = st.selectbox("Department", ["None", "Automation", "Maintenance", "Quality", "HR", "Finance", "Compliance"])
+    role = st.selectbox("Role", ["Admin", "Manager", "Employee"])
 
-selected_category = st.sidebar.selectbox("Select Category", list(categories.keys()))
-option = st.sidebar.radio("Choose a Module", categories[selected_category])
+    if st.button("Register"):
+        if username and password:
+            user = session.query(User).filter_by(username=username).first()
+            if user:
+                st.error("Username already exists!")
+            else:
+                new_user = User(username=username, password=hash_password(password), department=department, role=role)
+                session.add(new_user)
+                session.commit()
+                st.success("User registered successfully!")
+        else:
+            st.error("Please enter all the details.")
+
+def login_user():
+    st.title("Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        user = session.query(User).filter_by(username=username).first()
+        if user and check_password(password, user.password):
+            st.session_state['logged_in'] = True
+            st.session_state['username'] = username
+            st.session_state['role'] = user.role
+            st.session_state['department'] = user.department
+            st.success("Logged in successfully!")
+            st.experimental_rerun()
+        else:
+            st.error("Invalid username or password.")
+
+# Initialize session state for user authentication
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+
+# Sidebar for navigation
+if not st.session_state['logged_in']:
+    login_option = st.sidebar.selectbox("Login/Register", ["Login", "Register"])
+    if login_option == "Login":
+        login_user()
+    else:
+        register_user()
+else:
+    st.sidebar.write(f"Logged in as: {st.session_state['username']} ({st.session_state['role']})")
+    logout = st.sidebar.button("Logout")
+    if logout:
+        st.session_state['logged_in'] = False
+        st.experimental_rerun()
 
 # Project Templates
 project_templates = {
@@ -111,79 +151,41 @@ departments = ["None", "Automation", "Maintenance", "Quality", "QMS", "Stores", 
                "IE", "HR", "Sustainability", "Project", "MIS", "Business Analytics (BI)", 
                "Business transformation", "Finance", "Compliance"]
 
-def apply_template(template_name):
-    template = project_templates.get(template_name, {})
-    return template.get('goals', ''), template.get('stakeholders', ''), template.get('initial_risks', '')
+# Define the categories dictionary to be used for module navigation
+categories = {
+    "General": [
+        "Home",
+        "Dashboard"
+    ],
+    "Management": [
+        "Project Management",
+        "Risk Management",
+        "Resource Management",
+        "Time Tracking and Billing",
+        "Reporting",
+        "Project Portfolio Management"
+    ],
+    "Client and Stakeholder": [
+        "Client and Stakeholder Management",
+        "Knowledge Management"
+    ],
+    "Governance": [
+        "Compliance and Governance"
+    ],
+    "Extras": [
+        "Gamification",
+        "Continuous Improvement",
+        "AI-Powered Task Recommendations",
+        "Mobile Access and Notifications",
+        "Customizable Dashboards and Dark Mode",
+        "Advanced Scheduling"
+    ]
+}
 
-def load_project_data(selected_project):
-    project = session.query(Project).filter_by(name=selected_project).first()
-    if project:
-        st.session_state['project_data'] = {
-            'id': project.id,
-            'name': project.name,
-            'type': project.type,
-            'phase': project.phase,
-            'department': project.department,
-            'budget': project.budget,
-            'actual_cost': project.actual_cost,
-            'roi': project.roi,
-            'execution_progress': project.execution_progress,
-            'risk_level': project.risk_level,
-            'goals': project.goals,
-            'stakeholders': project.stakeholders,
-            'initial_risks': project.initial_risks,
-            'resources': project.resources,
-            'milestones': project.milestones,
-            'team_size': project.team_size,
-            'created_at': project.created_at
-        }
-    return project
-
-def save_project_data():
-    project = load_project_data(st.session_state['selected_project'])
-    if project:
-        project.name = st.session_state['project_data']['name']
-        project.type = st.session_state['project_data']['type']
-        project.phase = st.session_state['project_data']['phase']
-        project.department = st.session_state['project_data']['department']
-        project.budget = st.session_state['project_data']['budget']
-        project.actual_cost = st.session_state['project_data']['actual_cost']
-        project.roi = st.session_state['project_data']['roi']
-        project.execution_progress = st.session_state['project_data']['execution_progress']
-        project.risk_level = st.session_state['project_data']['risk_level']
-        project.goals = st.session_state['project_data']['goals']
-        project.stakeholders = st.session_state['project_data']['stakeholders']
-        project.initial_risks = st.session_state['project_data']['initial_risks']
-        project.resources = st.session_state['project_data']['resources']
-        project.milestones = st.session_state['project_data']['milestones']
-        project.team_size = st.session_state['project_data']['team_size']
-        session.commit()
-
-def select_project():
-    projects = session.query(Project).all()
-    project_names = [project.name for project in projects]
-    selected_project = st.sidebar.selectbox("Select Project", project_names)
-
-    if selected_project:
-        st.session_state['selected_project'] = selected_project
-        load_project_data(selected_project)
-
-select_project()
-
-# Home Page with Full-Screen GIF and Welcome Note
+# Home Page with Full-Screen Video and Welcome Note
 def home():
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background: url("C:/Users/brajb/OneDrive/Desktop/coding development/New BT app/Kaizen (3).gif");
-            background-size: cover;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
     st.title("Welcome to BT Project Management App")
+    st.video("C:/Users/brajb/OneDrive/Desktop/coding development/New BT app/Kaizen (1).mp4")
     st.write("This app is your one-stop solution for managing projects, resources, risks, and much more!")
 
 def dashboard():
@@ -191,7 +193,7 @@ def dashboard():
     
     st.subheader("Project Status Summary")
     
-    projects = session.query(Project).all()
+    projects = session.query(Project).filter_by(department=st.session_state['department']).all() if st.session_state['role'] != "Admin" else session.query(Project).all()
     if not projects:
         st.warning("No projects found. Please add a new project.")
         return
@@ -546,56 +548,61 @@ def advanced_scheduling():
     st.write("All events are integrated with the project calendar.")
 
 # Module selection based on user input
-if option == "Home":
-    home()
+if st.session_state['logged_in']:
+    selected_category = st.sidebar.selectbox("Select Category", list(categories.keys()))
+    option = st.sidebar.radio("Choose a Module", categories[selected_category])
 
-elif option == "Dashboard":
-    dashboard()
+    if option == "Home":
+        home()
 
-elif option == "Project Management":
-    project_management()
+    elif option == "Dashboard":
+        dashboard()
 
-elif option == "Risk Management":
-    risk_management()
+    elif option == "Project Management":
+        project_management()
 
-elif option == "Resource Management":
-    resource_management()
+    elif option == "Risk Management":
+        risk_management()
 
-elif option == "Time Tracking and Billing":
-    time_tracking_and_billing()
+    elif option == "Resource Management":
+        resource_management()
 
-elif option == "Reporting":
-    reporting()
+    elif option == "Time Tracking and Billing":
+        time_tracking_and_billing()
 
-elif option == "Project Portfolio Management":
-    project_portfolio_management()
+    elif option == "Reporting":
+        reporting()
 
-elif option == "Client and Stakeholder Management":
-    client_and_stakeholder_management()
+    elif option == "Project Portfolio Management":
+        project_portfolio_management()
 
-elif option == "Knowledge Management":
-    knowledge_management()
+    elif option == "Client and Stakeholder Management":
+        client_and_stakeholder_management()
 
-elif option == "Compliance and Governance":
-    compliance_and_governance()
+    elif option == "Knowledge Management":
+        knowledge_management()
 
-elif option == "Gamification":
-    gamification()
+    elif option == "Compliance and Governance":
+        compliance_and_governance()
 
-elif option == "Continuous Improvement":
-    continuous_improvement()
+    elif option == "Gamification":
+        gamification()
 
-elif option == "AI-Powered Task Recommendations":
-    ai_powered_task_recommendations()
+    elif option == "Continuous Improvement":
+        continuous_improvement()
 
-elif option == "Mobile Access and Notifications":
-    mobile_access_and_notifications()
+    elif option == "AI-Powered Task Recommendations":
+        ai_powered_task_recommendations()
 
-elif option == "Customizable Dashboards and Dark Mode":
-    customizable_dashboards_and_dark_mode()
+    elif option == "Mobile Access and Notifications":
+        mobile_access_and_notifications()
 
-elif option == "Advanced Scheduling":
-    advanced_scheduling()
+    elif option == "Customizable Dashboards and Dark Mode":
+        customizable_dashboards_and_dark_mode()
+
+    elif option == "Advanced Scheduling":
+        advanced_scheduling()
 
 # Closing session
 session.close()
+
